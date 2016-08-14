@@ -1,5 +1,5 @@
 # FTP-WatcherDog
-This is a program that watches the specified directories and inform the user if any changes has happened in these directories, changes include: \n
+This is a program that watches the specified directories and inform the user if any changes has happened in these directories, changes include:
 1) Adding New File/Folder.
 2) Removal of an existing File/Folder.
 3) Editing of an existing File/Folder. 
