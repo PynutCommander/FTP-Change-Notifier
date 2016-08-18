@@ -27,6 +27,7 @@ class Ui_new_server_Frame(QtGui.QWidget):
         QtGui.QWidget.__init__(self)
         self.setupUi(self)
         self.Parent = Parent
+        self.ConnectionStatus = False
 
     def setupUi(self, new_server_Frame):
         new_server_Frame.setObjectName(_fromUtf8("new_server_Frame"))
@@ -79,6 +80,21 @@ class Ui_new_server_Frame(QtGui.QWidget):
         self.server_URL_TE.setObjectName(_fromUtf8("server_URL_TE"))
         self.horizontalLayout_3.addWidget(self.server_URL_TE)
         self.verticalLayout.addWidget(self.server_URL_Frame)
+        self.server_Port_Frame = QtGui.QFrame(new_server_Frame)
+        self.server_Port_Frame.setFrameShape(QtGui.QFrame.StyledPanel)
+        self.server_Port_Frame.setFrameShadow(QtGui.QFrame.Raised)
+        self.server_Port_Frame.setObjectName(_fromUtf8("server_Port_Frame"))
+        self.horizontalLayout_7 = QtGui.QHBoxLayout(self.server_Port_Frame)
+        self.horizontalLayout_7.setObjectName(_fromUtf8("horizontalLayout_7"))
+        self.server_Port_TV = QtGui.QLabel(self.server_Port_Frame)
+        self.server_Port_TV.setObjectName(_fromUtf8("server_Port_TV"))
+        self.horizontalLayout_7.addWidget(self.server_Port_TV)
+        spacerItem3 = QtGui.QSpacerItem(50,10, QtGui.QSizePolicy.Fixed, QtGui.QSizePolicy.Minimum)
+        self.horizontalLayout_7.addItem(spacerItem3)
+        self.server_Port_TE = QtGui.QLineEdit(self.server_Port_Frame)
+        self.server_Port_TE.setObjectName(_fromUtf8("server_Port_TE"))
+        self.horizontalLayout_7.addWidget(self.server_Port_TE)
+        self.verticalLayout.addWidget(self.server_Port_Frame)
         self.root_Directory_Frame = QtGui.QFrame(new_server_Frame)
         self.root_Directory_Frame.setFrameShape(QtGui.QFrame.StyledPanel)
         self.root_Directory_Frame.setFrameShadow(QtGui.QFrame.Raised)
@@ -117,7 +133,11 @@ class Ui_new_server_Frame(QtGui.QWidget):
         self.cancel_Button = QtGui.QPushButton(self.buttons_Frame)
         self.cancel_Button.setObjectName(_fromUtf8("cancel_Button"))
         self.horizontalLayout_4.addWidget(self.cancel_Button)
+        self.test_Button = QtGui.QPushButton(self.buttons_Frame)
+        self.test_Button.setObjectName(_fromUtf8("test_Button"))
+        self.horizontalLayout_4.addWidget(self.test_Button)
         self.verticalLayout.addWidget(self.buttons_Frame)
+
 
         self.retranslateUi(new_server_Frame)
         QtCore.QMetaObject.connectSlotsByName(new_server_Frame)
@@ -127,10 +147,12 @@ class Ui_new_server_Frame(QtGui.QWidget):
         self.username_TV.setText(_translate("new_server_Frame", "Username", None))
         self.password_TV.setText(_translate("new_server_Frame", "Password", None))
         self.server_URL_TV.setText(_translate("new_server_Frame", "Host", None))
+        self.server_Port_TV.setText(_translate("new_server_Frame", "Port", None))
         self.root_Directory_TV.setText(_translate("new_server_Frame", "Root Directory", None))
         self.serverName_TV.setText(_translate("new_server_Frame", "Server Name", None))
         self.new_server_Button.setText(_translate("new_server_Frame", "New FTP Server", None))
         self.cancel_Button.setText(_translate("new_server_Frame", "Cancel", None))
+        self.test_Button.setText(_translate("new_server_Frame", "Test Connection", None))
 
 
     def pad(self, parameter):#Pad function for the encryption/decryption Function
@@ -148,6 +170,84 @@ class Ui_new_server_Frame(QtGui.QWidget):
         l = dec.count("{")
         return dec[:len(dec)-l]
 
+    @QtCore.pyqtSignature("on_test_Button_clicked()")
+    def test_server_connection(self):
+        userName = self.username_TE.text()
+        password = self.password_TE.text()
+        URLHost = self.server_URL_TE.text()
+        rootDirectory = self.root_Directory_TE.text()
+        serverName = self.serverName_TE.text()
+        serverPort = self.server_Port_TE.text()
+
+        if (not serverPort):
+            serverPort = 21
+        elif(serverPort):
+            try:
+                serverPort = int(serverPort)
+            except TypeError:
+                QtGui.QMessageBox.warning(self, "Wrong Port Type ", "Please type in integer value for port")
+                return
+            except ValueError:
+                QtGui.QMessageBox.warning(self, "Wrong Port Type ", "Please type in integer value for port")
+                return
+
+        if ((not userName) or (not password) or (not URLHost) or (not rootDirectory) or (not serverName)):
+            QtGui.QMessageBox.warning(self, "Please Enter Username", "please fill in all information before proceeding")
+            return
+        else:  # pass in all the information into the login Function
+            self.connection_Status(userName, password, URLHost, serverPort, serverName, rootDirectory)
+            if(self.ConnectionStatus == True):
+                QtGui.QMessageBox.warning(self, "Successful Connection", "Successfully Connected to " + str(URLHost))
+            else:
+                QtGui.QMessageBox.warning(self, "Failed Connection", "Failed To Connect to "+ str(URLHost))
+
+    def connection_Status(self, userName, password, URLHost, serverPort, serverName, rootDirectory):
+        try:  # Get the number of servers that has the name Host name if Exists
+            self.Parent.databaseCursor.execute(
+                "SELECT COUNT(*) FROM server WHERE host LIKE " + "'" + str(URLHost) + "'")
+            self.Parent.cnnct.commit()
+            fetched_Size = self.Parent.databaseCursor.fetchall()
+            occurences_Of_Host = int(fetched_Size[0][0])
+        except mysql.connector.Error as e:
+            QtGui.QMessageBox.warning(self, "Selecting Number of Servers with HostName.", str(e.msg))
+
+        try:  # Get the number of servers that has the same server name (Nick Name) if Exists.
+            self.Parent.databaseCursor.execute(
+                "SELECT COUNT(*) FROM server WHERE serverName LIKE " + "'" + str(serverName) + "'")
+            self.Parent.cnnct.commit()
+            fetched_Size = self.Parent.databaseCursor.fetchall()
+            occurences_Of_ServerName = int(fetched_Size[0][0])
+        except mysql.connector.Error as e:
+            QtGui.QMessageBox.warning(self, "Selecting Number of Servers with ServerName", str(e.msg))
+            self.ConnectionStatus = False
+
+        if (
+            occurences_Of_Host > 0):  # Check if there are any servers with the same Host or Server Names. if Exists then throw an error.
+            QtGui.QMessageBox.warning(self, "Server Host Already Exists.",
+                                      "You already Added this URL server! " + str(URLHost))
+            self.ConnectionStatus =False
+            return
+        elif (occurences_Of_ServerName > 0):
+            QtGui.QMessageBox.warning(self, "Server Name Already Exists.",
+                                      "You are already using This name for another Server! " + str(userName))
+            self.ConnectionStatus = False
+            return
+        else:  # Try to connect to FTP server with the information given if they pass all the checks.
+            try:  # change the working directory to the given Root Directory.
+                # serverPort=int(serverPort)
+                # print(serverPort)
+                # print(type(serverPort))
+                ftp = ftplib.FTP()
+                ftp.connect(host=URLHost, port=serverPort)
+                ftp.login(user=userName, passwd=password)
+                ftp.cwd(rootDirectory)
+            except ftplib.all_errors as ERR:
+                QtGui.QMessageBox.warning(self, "FTP Connection ERROR", str(ERR))
+                self.ConnectionStatus = False
+                return
+            ftp.close()
+        self.ConnectionStatus = True
+
 
 
     @QtCore.pyqtSignature("on_new_server_Button_clicked()")
@@ -158,48 +258,31 @@ class Ui_new_server_Frame(QtGui.QWidget):
         URLHost = self.server_URL_TE.text()
         rootDirectory = self.root_Directory_TE.text()
         serverName = self.serverName_TE.text()
+        serverPort = self.server_Port_TE.text()
+
+        if (not serverPort):
+            serverPort = 21
+        elif(serverPort):
+            try:
+                serverPort = int(serverPort)
+            except TypeError:
+                QtGui.QMessageBox.warning(self, "Wrong Port Type ", "Please type in integer value for port")
+                return
+            except ValueError:
+                QtGui.QMessageBox.warning(self, "Wrong Port Type ", "Please type in integer value for port")
+                return
         #Checker to make sure that none of the Text edits are empty.
         if ((not userName) or (not password) or (not URLHost) or (not rootDirectory) or (not serverName)):
             QtGui.QMessageBox.warning(self, "Please Enter Username", "please fill in all information before proceeding")
         else:#pass in all the information into the login Function
-            self.attemptLogin(userName, password, URLHost, serverName, rootDirectory)
+            self.attemptLogin(userName, password, URLHost, serverPort, serverName, rootDirectory)
 
-    def attemptLogin(self, userName, password, URLHost, serverName, rootDirectory):#Attempt login function with multiple Checks before creation.
-        try:#Get the number of servers that has the name Host name if Exists
-            self.Parent.databaseCursor.execute("SELECT COUNT(*) FROM server WHERE host LIKE " + "'" + str(URLHost) + "'")
-            self.Parent.cnnct.commit()
-            fetched_Size = self.Parent.databaseCursor.fetchall()
-            occurences_Of_Host = int(fetched_Size[0][0])
-        except mysql.connector.Error as e:
-            QtGui.QMessageBox.warning(self, "Selecting Number of Servers with HostName.", str(e.msg))
-
-        try:#Get the number of servers that has the same server name (Nick Name) if Exists.
-            self.Parent.databaseCursor.execute("SELECT COUNT(*) FROM server WHERE serverName LIKE " + "'" + str(serverName) + "'")
-            self.Parent.cnnct.commit()
-            fetched_Size = self.Parent.databaseCursor.fetchall()
-            occurences_Of_ServerName = int(fetched_Size[0][0])
-        except mysql.connector.Error as e:
-            QtGui.QMessageBox.warning(self, "Selecting Number of Servers with ServerName", str(e.msg))
-
-        if(occurences_Of_Host > 0):#Check if there are any servers with the same Host or Server Names. if Exists then throw an error.
-            QtGui.QMessageBox.warning(self, "Server Host Already Exists.", "You already Added this URL server! " + str(URLHost))
-            return
-        elif(occurences_Of_ServerName > 0):
-            QtGui.QMessageBox.warning(self, "Server Name Already Exists.","You are already using This name for another Server! " + str(userName))
-            return
-
-        else:#Try to connect to FTP server with the information given if they pass all the checks.
-            try:#change the working directory to the given Root Directory.
-                ftp = ftplib.FTP(URLHost)
-                ftp.login(user = userName, passwd= password)
-                ftp.cwd(rootDirectory)
-            except ftplib.all_errors as ERR:
-                QtGui.QMessageBox.warning(self, "FTP Connection ERROR", str(ERR))
-                return
-            ftp.close()
-
+    def attemptLogin(self, userName, password, URLHost, serverPort,serverName, rootDirectory):#Attempt login function with multiple Checks before creation.
+        if(self.ConnectionStatus == False):
+            self.connection_Status(userName, password, URLHost, serverPort, serverName, rootDirectory)
+        if(self.ConnectionStatus == True):
             try:#If the connection + root directory went well then insert all the information into our Database in the Server Table. *We encrypt the password and insert the encrypted value into DB
-                self.Parent.databaseCursor.execute("INSERT INTO server (serverName, host, username, password) VALUES(%s,%s,%s,%s)", (serverName, URLHost, userName, self.encrypt(password)))
+                self.Parent.databaseCursor.execute("INSERT INTO server (serverName, host, port, username, password) VALUES(%s,%s,%s,%s,%s)", (serverName, URLHost, serverPort, userName, self.encrypt(password)))
                 self.Parent.cnnct.commit()
             except mysql.connector.Error as e:
                 QtGui.QMessageBox.warning(self, "Inserting server Information into DB Error", str(e.msg))
@@ -217,9 +300,10 @@ class Ui_new_server_Frame(QtGui.QWidget):
                 self.Parent.cnnct.commit()
             except mysql.connector.Error as e:
                 QtGui.QMessageBox.warning(self, "Inserting Directory into DB Error", str(e.msg))
-
             self.Parent.refreshServerList()#call the refresh list function inside the parent to refresh the list of servers/Directories.
             self.close()#close this window.
+        else:
+            QtGui.QMessageBox.warning(self, "connection Error", "Could not connect to the server.")
 
 
     @QtCore.pyqtSignature("on_cancel_Button_clicked()")

@@ -164,7 +164,7 @@ class Ui_new_Database_Frame(QtGui.QWidget):
 
             try:# after connecting to the database run multiple queries to create the tables if they don't exist
                 #create the server Table
-                cursor.execute("""CREATE TABLE IF NOT EXISTS Server(id INTEGER AUTO_INCREMENT, serverName TEXT, host TEXT,
+                cursor.execute("""CREATE TABLE IF NOT EXISTS Server(id INTEGER AUTO_INCREMENT, serverName TEXT, host TEXT, port INTEGER,
                             userName TEXT, password LONGBLOB, PRIMARY KEY(id))""")
                 #create the directory table
                 cursor.execute(
@@ -195,7 +195,7 @@ class Ui_new_Database_Frame(QtGui.QWidget):
             cnnct.close()
 
             self.Parent.refreshServerList()#call the refresh list function inside the parent to refresh the list of servers/Directories.
-            self.Parent.resetChecker()
+            # self.Parent.resetChecker()
             self.close()#close this window.
 
 
@@ -261,7 +261,7 @@ class Ui_new_Database_Frame(QtGui.QWidget):
 
             cursor = cnnct.cursor()# set the cursor and create the missing tables if any
             #create server table
-            cursor.execute("""CREATE TABLE IF NOT EXISTS Server(id INTEGER AUTO_INCREMENT, serverName TEXT, host TEXT,
+            cursor.execute("""CREATE TABLE IF NOT EXISTS Server(id INTEGER AUTO_INCREMENT, serverName TEXT, host TEXT, port INTEGER,
                         userName TEXT, password LONGBLOB, PRIMARY KEY(id))""")
             # create the directory table
             cursor.execute(

@@ -16,6 +16,7 @@ class FTP_checker(QtCore.QObject):
         self.Parent = Parent
         self.checkDelay=2
         self.configured_Database = False
+        self.listOfConnectedServers = []
 
     def setConfiguredDB(self):
         self.configured_Database = False
@@ -49,6 +50,7 @@ class FTP_checker(QtCore.QObject):
             dbInformation.close()
             db_Existence = self.set_Database_Cursor(dbUsername, dbPassword, dbURLHost, dbName)
             if (db_Existence == True):
+                self.Parent.refreshcaller()
                 print("Connected to DB")
             else:
                 print("couldnt find db")
@@ -116,7 +118,7 @@ class FTP_checker(QtCore.QObject):
         for counter in range(len(self.keyIDs)):
             # -------------- GET USER NAMES AND PASSWOED
             try:#get the servername, and host, username of the selected server ID
-                self.databaseCursor.execute("SELECT serverName, host, userName FROM server WHERE id LIKE " + "'" + str(
+                self.databaseCursor.execute("SELECT serverName, host, userName, port FROM server WHERE id LIKE " + "'" + str(
                     self.keyIDs[counter]) + "'")
                 self.cnnct.commit()
                 self.serverInformation = self.databaseCursor.fetchall()
@@ -129,6 +131,13 @@ class FTP_checker(QtCore.QObject):
             try:#we set the userName and Host from the selected values from the DB.
                 userName = self.serverInformation[0][2]
                 hostURL = self.serverInformation[0][1]
+                serverPort = self.serverInformation[0][3]
+                serverName = self.serverInformation[0][0]
+                try:
+                    serverPort = int(serverPort)
+                except ValueError:
+                    QtGui.QMessageBox.warning(self, "Wrong Port Type ", "Please type in integer value for port")
+                    return
             except:
                 return
 
@@ -146,8 +155,10 @@ class FTP_checker(QtCore.QObject):
 
             # ----------------- START OF FTP CONNECTION
             try:#connect to the FTP servert
-                ftp = ftplib.FTP(hostURL)
+                ftp = ftplib.FTP()
+                ftp.connect(host=hostURL, port=serverPort)
                 ftp.login(user=userName, passwd=userPassword)
+                self.listOfConnectedServers.append(serverName)
 
                 for dirCounter in range(len(self.serverIDictionary[self.keyIDs[counter]])):#runs for the length of the number of directories in each server
                     ftp.cwd(str(self.serverIDictionary[self.keyIDs[counter]][dirCounter]))#change the directory to that specific directory
@@ -248,7 +259,7 @@ class FTP_checker(QtCore.QObject):
 
             try:#get the server name of that dictionary in order to connect to the FTP.
                 self.databaseCursor.execute(
-                    "SELECT serverName, host, userName FROM server WHERE id LIKE " + "'" + str(self.keyIDs[counter]) + "'")
+                    "SELECT serverName, host, userName, port FROM server WHERE id LIKE " + "'" + str(self.keyIDs[counter]) + "'")
                 self.cnnct.commit()
                 self.serverInformation = self.databaseCursor.fetchall()
             except mysql.connector.Error as e:
@@ -258,6 +269,13 @@ class FTP_checker(QtCore.QObject):
             try:# set the username and password of the FTP server.
                 userName = self.serverInformation[0][2]
                 hostURL = self.serverInformation[0][1]
+                serverPort = self.serverInformation[0][3]
+                serverName = self.serverInformation[0][0]
+                try:
+                    serverPort = int(serverPort)
+                except ValueError:
+                    QtGui.QMessageBox.warning(self, "Wrong Port Type ", "FTP checker serverPort not integer Value")
+                    return
             except :
                 return
 
@@ -274,9 +292,11 @@ class FTP_checker(QtCore.QObject):
 
             # ----------------- START OF FTP CONNECTION
             try:#set the ftp host and log in with username and apssword.
-                ftp = ftplib.FTP(hostURL)
+                ftp = ftplib.FTP()
+                ftp.connect(host=hostURL, port=serverPort)
                 ftp.login(user=userName, passwd=userPassword)
-
+                if(serverName not in self.listOfConnectedServers):
+                    self.listOfConnectedServers.append(serverName)
                 for serverCounter in range(len(self.serverIDictionary[self.keyIDs[counter]])):#run for number of servers
                     ftp.cwd(str(self.serverIDictionary[self.keyIDs[counter]][serverCounter]))#move to the designated directory
                     listOfFTPFiles = []
@@ -423,6 +443,8 @@ class FTP_checker(QtCore.QObject):
         self.serverIDictionary = defaultdict(list)
         del self.keyIDs
         self.keyIDs = []
+        del self.listOfConnectedServers
+        self.listOfConnectedServers = []
 
 
     def checkServers(self):
@@ -460,3 +482,6 @@ class FTP_checker(QtCore.QObject):
 
     def getCheckDelay(self):
         return self.checkDelay
+
+    def getListOfConnectedServers(self):
+        return self.listOfConnectedServers

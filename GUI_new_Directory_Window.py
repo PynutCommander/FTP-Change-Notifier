@@ -128,7 +128,6 @@ class Ui_new_directory_Form(QtGui.QWidget):
         except mysql.connector.Error as e:
             QtGui.QMessageBox.warning(self, "Inserting directory into the database Error", str(e.msg))
             return
-
         self.Parent.refreshServerList()#call the refresh list function inside the parent to refresh the list of servers/Directories.
         self.close()#close this window.
 
