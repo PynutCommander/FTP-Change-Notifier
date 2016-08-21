@@ -3,6 +3,7 @@ from PyQt4 import QtCore, QtGui
 from Crypto.Cipher import AES
 import os
 import ftplib
+import codecs
 from collections import defaultdict
 import time
 import datetime
@@ -13,6 +14,7 @@ class FTP_checker(QtCore.QObject):
         super(FTP_checker, self).__init__()
         self.listOfMonths = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9,
                              "Oct": 10, "Nov": 11, "Dec": 12}
+        self.monthsNumbers = [1,2,3,4,5,6,7,8,9,10,11,12]
         self.Parent = Parent
         self.checkDelay = 2 # default checking delay is 2 seconds
         self.configuredDatabase = False
@@ -82,279 +84,264 @@ class FTP_checker(QtCore.QObject):
 
 
     def FTP_Checker(self):
-        try:
-            while (self.configuredDatabase == True):
-                time.sleep(self.checkDelay)
-                #INsert Garbage Collector
-                self.garbageCollector()
-                #Check how many Servers are there.
+        while (self.configuredDatabase == True):
+            time.sleep(self.checkDelay)
+            #INsert Garbage Collector
+            self.garbageCollector()
+            #Check how many Servers are there.
+            try:
+                self.databaseCursor.execute(
+                    "SELECT COUNT(*) FROM server"
+                )
+                self.cnnct.commit()
+                self.fetchedNumberOfServers = self.databaseCursor.fetchall()
+                # print(self.fetchedNumberOfServers)
+            except mysql.connector.Error as e:
+                reportMessage = "Error Getting Number of Servers : " + str(e.msg)
+                self.reportToFile(self.reportFileNames[1], reportMessage)
+                self.resetAll()
+
+            if(self.fetchedNumberOfServers[0][0] > 0):
+                self.reportToFile(self.reportFileNames[1], "Found " + str(self.fetchedNumberOfServers[0][0]) + " Servers, Proceeding...\n")
+                # print(self.fetchedNumberOfServers[0][0])
+
+                #Getting all Unactivated Directories.
                 try:
                     self.databaseCursor.execute(
-                        "SELECT COUNT(*) FROM server"
+                        "SELECT serverid, directoryName, Activated FROM directory WHERE Activated LIKE '0'"
                     )
                     self.cnnct.commit()
-                    self.fetchedNumberOfServers = self.databaseCursor.fetchall()
-                    # print(self.fetchedNumberOfServers)
+                    self.fetchedUnactivatedDirectories = self.databaseCursor.fetchall()
                 except mysql.connector.Error as e:
-                    reportMessage = "Error Getting Number of Servers : " + str(e.msg)
+                    reportMessage = "Error getting Unactivated Directories from Database : \n" + str(e) + "\n"
+                    self.reportToFile(self.reportFileNames[2], reportMessage)
+                    self.resetAll()
+
+                #Getting all activated Directories
+                try:
+                    self.databaseCursor.execute(
+                        "SELECT serverid, directoryName, Activated FROM directory WHERE Activated LIKE '1'"
+                    )
+                    self.cnnct.commit()
+                    self.fetchedActivatedDirectories = self.databaseCursor.fetchall()
+                except mysql.connector.Error as e:
+                    reportMessage = "Error getting Activated Directories from Database : \n" + str(e) + "\n"
+                    self.reportToFile(self.reportFileNames[2], reportMessage)
+                    self.resetAll()
+                try:
+                    self.databaseCursor.execute(
+                        "SELECT serverName from server"
+                    )
+                    self.cnnct.commit()
+                    self.fetchedServerNames = self.databaseCursor.fetchall()
+                    self.listofConnectedServers=[]
+                    for counter in range(len(self.fetchedServerNames)):
+                        self.listofConnectedServers.append(self.fetchedServerNames[counter][0])
+                except mysql.connector.Error as e:
+                    reportMessage = "Error getting server Names from Database : \n" + str(e) + "\n"
                     self.reportToFile(self.reportFileNames[1], reportMessage)
                     self.resetAll()
 
-                if(self.fetchedNumberOfServers[0][0] > 0):
-                    self.reportToFile(self.reportFileNames[1], "Found " + str(self.fetchedNumberOfServers[0][0]) + " Servers, Proceeding...\n")
-                    # print(self.fetchedNumberOfServers[0][0])
+                #Start Filling the Dictionary
+                # print(len(self.fetchedUnactivatedDirectories))
+                self.garbageCollector()
+                if(len(self.fetchedUnactivatedDirectories) > 0):
+                    self.directoryFiller(self.fetchedUnactivatedDirectories)
+                    self.UnactivatedToActivated()
 
-                    #Getting all Unactivated Directories.
-                    try:
-                        self.databaseCursor.execute(
-                            "SELECT serverid, directoryName, Activated FROM directory WHERE Activated LIKE '0'"
-                        )
-                        self.cnnct.commit()
-                        self.fetchedUnactivatedDirectories = self.databaseCursor.fetchall()
-                    except mysql.connector.Error as e:
-                        reportMessage = "Error getting Unactivated Directories from Database : \n" + str(e) + "\n"
-                        self.reportToFile(self.reportFileNames[2], reportMessage)
-                        self.resetAll()
+                self.garbageCollector()
 
-                    #Getting all activated Directories
-                    try:
-                        self.databaseCursor.execute(
-                            "SELECT serverid, directoryName, Activated FROM directory WHERE Activated LIKE '1'"
-                        )
-                        self.cnnct.commit()
-                        self.fetchedActivatedDirectories = self.databaseCursor.fetchall()
-                    except mysql.connector.Error as e:
-                        reportMessage = "Error getting Activated Directories from Database : \n" + str(e) + "\n"
-                        self.reportToFile(self.reportFileNames[2], reportMessage)
-                        self.resetAll()
-                    try:
-                        self.databaseCursor.execute(
-                            "SELECT serverName from server"
-                        )
-                        self.cnnct.commit()
-                        self.fetchedServerNames = self.databaseCursor.fetchall()
-                        self.listofConnectedServers=[]
-                        for counter in range(len(self.fetchedServerNames)):
-                            self.listofConnectedServers.append(self.fetchedServerNames[counter][0])
-                    except mysql.connector.Error as e:
-                        reportMessage = "Error getting server Names from Database : \n" + str(e) + "\n"
-                        self.reportToFile(self.reportFileNames[1], reportMessage)
-                        self.resetAll()
+                if(len(self.fetchedActivatedDirectories) > 0):
+                    self.directoryFiller(self.fetchedActivatedDirectories)
+                    self.checkActivated()
 
-                    #Start Filling the Dictionary
-                    # print(len(self.fetchedUnactivatedDirectories))
-                    if(len(self.fetchedUnactivatedDirectories) > 0):
-                        self.directoryFiller(self.fetchedUnactivatedDirectories)
-                        self.UnactivatedToActivated()
+                # print(self.listofConnectedServers)
 
-                    self.garbageCollector()
-
-                    if(len(self.fetchedActivatedDirectories) > 0):
-                        self.directoryFiller(self.fetchedActivatedDirectories)
-                        self.checkActivated()
-
-                    # print(self.listofConnectedServers)
-
-                    self.garbageCollector()
+                self.garbageCollector()
 
 
-                elif (self.fetchedNumberOfServers[0][0] == 0):
-                    self.reportToFile(self.reportFileNames[1], "There are no Servers in the database...")
-        except IndexError:
-            reportMessage = "Index Error 2"
-            self.reportToFile(self.reportFileNames[4], reportMessage)
-            self.resetAll()
+            elif (self.fetchedNumberOfServers[0][0] == 0):
+                self.reportToFile(self.reportFileNames[1], "There are no Servers in the database...")
+
 
 
 
     def checkActivated(self):
-        try:
-            for counter in range(len(self.serverDirectoryDictionary)):
-                try:
-                    self.databaseCursor.execute(
-                        "SELECT serverName, host, userName, port FROM server WHERE id LIKE " + "'" + str(self.keyIDs[counter]) + "'"
-                    )
-                    self.cnnct.commit()
-                    self.serverInformation = self.databaseCursor.fetchall()
-                except mysql.connector.Error as e:
-                    reportMessage = "Error getting Activated Servers \n" + str(e.msg) + "\n"
-                    self.reportToFile(self.reportFileNames[0], reportMessage)
-                    self.resetAll()
+        for counter in range(len(self.serverDirectoryDictionary)):
+            try:
+                self.databaseCursor.execute(
+                    "SELECT serverName, host, userName, port FROM server WHERE id LIKE " + "'" + str(self.keyIDs[counter]) + "'"
+                )
+                self.cnnct.commit()
+                self.serverInformation = self.databaseCursor.fetchall()
+            except mysql.connector.Error as e:
+                reportMessage = "Error getting Activated Servers \n" + str(e.msg) + "\n"
+                self.reportToFile(self.reportFileNames[0], reportMessage)
+                self.resetAll()
 
-                try:
-                    serverName = self.serverInformation[0][0]
-                    hostURL = self.serverInformation[0][1]
-                    userName = self.serverInformation[0][2]
-                    serverPort = self.serverInformation[0][3]
-                except ValueError:
-                    reportMessage = "Faield to assign fetched information from Activated servers :\n" + str(e.msg) + "\n"
-                    self.reportToFile(self.reportFileNames[1], reportMessage)
-                    self.resetAll()
+            try:
+                serverName = self.serverInformation[0][0]
+                hostURL = self.serverInformation[0][1]
+                userName = self.serverInformation[0][2]
+                serverPort = self.serverInformation[0][3]
+            except ValueError:
+                reportMessage = "Faield to assign fetched information from Activated servers :\n" + str(e.msg) + "\n"
+                self.reportToFile(self.reportFileNames[1], reportMessage)
+                self.resetAll()
 
-                try:
-                    self.databaseCursor.execute(
-                        "SELECT password FROM server WHERE  id LIKE " + "'" + str(self.keyIDs[counter]) + "'"
-                    )
-                    self.cnnct.commit()
-                    fetchedServerPassword = self.databaseCursor.fetchall()
-                    userPassword = self.Parent.decrypt_server_password(fetchedServerPassword[0])
-                except mysql.connector.Error as e:
-                    reportMessage = "Failed to fetch Password from Activated server from DB : \n" + str(e) + "\n"
-                    self.reportToFile(self.reportFileNames[0], reportMessage)
-                    self.resetAll()
+            try:
+                self.databaseCursor.execute(
+                    "SELECT password FROM server WHERE  id LIKE " + "'" + str(self.keyIDs[counter]) + "'"
+                )
+                self.cnnct.commit()
+                fetchedServerPassword = self.databaseCursor.fetchall()
+                userPassword = self.Parent.decrypt_server_password(fetchedServerPassword[0])
+            except mysql.connector.Error as e:
+                reportMessage = "Failed to fetch Password from Activated server from DB : \n" + str(e) + "\n"
+                self.reportToFile(self.reportFileNames[0], reportMessage)
+                self.resetAll()
 
-                try:
-                    ftp = ftplib.FTP()
-                    ftp.connect(host = hostURL, port = serverPort)
-                    ftp.login(user = userName, passwd= userPassword)
+            try:
+                ftp = ftplib.FTP()
+                ftp.connect(host = hostURL, port = serverPort)
+                ftp.login(user = userName, passwd= userPassword)
 
-                    for serverCounter in range(len(self.serverDirectoryDictionary[self.keyIDs[counter]])):
-                        try:  # Change to Currect Working Directory
-                            ftp.cwd(str(self.serverDirectoryDictionary[self.keyIDs[counter]][serverCounter]))
-                            listofFTPfiles = []
-                            ftp.dir(listofFTPfiles.append)
-                            splittedFiles = []
-                        except ftplib.all_errors as directoryError:
-                            reportMessage = "Failed to CWD inside Activated FTP server \n" + str(directoryError) + "\n"
-                            self.reportToFile(self.reportFileNames[3], reportMessage)
-                            self.resetAll()
+                for serverCounter in range(len(self.serverDirectoryDictionary[self.keyIDs[counter]])):
+                    try:  # Change to Currect Working Directory
+                        ftp.cwd(str(self.serverDirectoryDictionary[self.keyIDs[counter]][serverCounter]))
+                        listofFTPfiles = []
+                        ftp.dir(listofFTPfiles.append)
+                        splittedFiles = []
+                    except ftplib.all_errors as directoryError:
+                        reportMessage = "Failed to CWD inside Activated FTP server \n" + str(directoryError) + "\n"
+                        self.reportToFile(self.reportFileNames[3], reportMessage)
+                        self.resetAll()
 
-                        for splittedCounter in range(len(listofFTPfiles)):
-                            splittedFiles.append(self.splitClearer(listofFTPfiles[splittedCounter].split(" ")))
+                    for splittedCounter in range(len(listofFTPfiles)):
+                        splittedFiles.append(self.splitClearer(listofFTPfiles[splittedCounter].split(" ")))
 
-                        try:
-                            self.databaseCursor.execute("SELECT file, ModifiedTime FROM file WHERE directoryName LIKE " +"'" + self.serverDirectoryDictionary[self.keyIDs[counter]][serverCounter] + "'")
-                            self.cnnct.commit()
-                            fetchedFileNames = self.databaseCursor.fetchall()
-                        except mysql.connector.Error as e:
-                            reportMessage = "Failed to fetch files and modified Time from Activated server File table : \n" + str(e.msg) + "\n"
-                            self.reportToFile(self.reportFileNames[0], reportMessage)
-                            self.resetAll()
+                    try:
+                        self.databaseCursor.execute("SELECT file, ModifiedTime FROM file WHERE directoryName LIKE " +"'" + self.serverDirectoryDictionary[self.keyIDs[counter]][serverCounter] + "'")
+                        self.cnnct.commit()
+                        fetchedFileNames = self.databaseCursor.fetchall()
+                    except mysql.connector.Error as e:
+                        reportMessage = "Failed to fetch files and modified Time from Activated server File table : \n" + str(e.msg) + "\n"
+                        self.reportToFile(self.reportFileNames[0], reportMessage)
+                        self.resetAll()
 
-                        self.checkIteration(fetchedFileNames, splittedFiles, serverCounter, counter)
-                        self.CheckExistenceDbToServer(fetchedFileNames, splittedFiles, serverCounter, counter)
-                        self.CheckExistenceServerToDb(fetchedFileNames, splittedFiles, serverCounter, counter)
+                    self.checkIteration(fetchedFileNames, splittedFiles, serverCounter, counter)
+                    self.CheckExistenceDbToServer(fetchedFileNames, splittedFiles, serverCounter, counter)
+                    self.CheckExistenceServerToDb(fetchedFileNames, splittedFiles, serverCounter, counter)
 
-                except ftplib.all_errors as ftpErr:
-                    reportMessage = "Failed to Connect to FTP server : \n" + str(ftpErr) + "\n"
-                    self.reportToFile(self.reportFileNames[3], reportMessage)
-                    self.resetAll()
-        except IndexError:
-            reportMessage = "Index Error 1"
-            self.reportToFile(self.reportFileNames[4], reportMessage)
-            self.resetAll()
+            except ftplib.all_errors as ftpErr:
+                reportMessage = "Failed to Connect to FTP server : \n" + str(ftpErr) + "\n"
+                self.reportToFile(self.reportFileNames[3], reportMessage)
+                self.resetAll()
+
 
 
     def CheckExistenceServerToDb(self, listOne, listTwo, serverCounter, maincounter):
-        try:
-            for counter in range(len(listTwo)):
-                found = False
+        for counter in range(len(listTwo)):
+            found = False
+            try:
+                for counterTwo in range(len(listOne)):
+                    if(listTwo[counter][8] == listOne[counterTwo][0]):
+                        found = True
+                        break
+            except IndexError:
+                self.resetAll()
+
+            if(found == False):
+
+                self.Parent.popupAnnouncer("File Has Been Added To " + self.serverInformation[0][0] + " At " + str(
+                    self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]), listTwo[counter][8])
+
                 try:
-                    for counterTwo in range(len(listOne)):
-                        if(listTwo[counter][8] == listOne[counterTwo][0]):
-                            found = True
-                            break
-                except IndexError:
+                    currentYear = datetime.datetime.now().year
+                    currentMinutes = datetime.datetime.now().minute
+                    currentHours = datetime.datetime.now().hour
+                    currentSeconds = datetime.datetime.now().second
+                    FTPserverDateTime = datetime.datetime(int(currentYear), int(
+                        self.listOfMonths[str(listTwo[counterTwo][5])]),
+                                                          int(listTwo[counterTwo][6]), int(currentHours),
+                                                          int(currentMinutes), currentSeconds)
+                    self.databaseCursor.execute("INSERT INTO file VALUES (%s,%s,%s)", ((str(self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter])),
+                                                                                       (str(listTwo[counter][8])),(FTPserverDateTime)))
+                except mysql.connector.Error as e:
+                    reportMessage = ("Failed to Add Activated Directory To File \n" + str(e.msg) + "\n")
+                    self.reportToFile(self.reportFileNames[0], reportMessage)
+                    self.resetAll()
+                try:  # insert into the log the information about the file addition.
+                    self.databaseCursor.execute(
+                        """
+                        INSERT INTO log
+                        VALUES(%s,%s,%s,%s)
+                        """,
+                        (self.keyIDs[maincounter],
+                         str(self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]),
+                         ("New File Has Been Added: " + "'" + str(listTwo[counter][8])) + "'",
+                         FTPserverDateTime))
+                    self.cnnct.commit()
+                except mysql.connector.Error as e:
+                    reportMessage = ("Failed to Add Activated Directory To Log \n" + str(e.msg) + "\n")
+                    self.reportToFile(self.reportFileNames[0], reportMessage)
                     self.resetAll()
 
-                if(found == False):
-
-                    self.Parent.popupAnnouncer("File Has Been Added To " + self.serverInformation[0][0] + " At " + str(
-                        self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]), listTwo[counter][8])
-
-                    try:
-                        currentYear = datetime.datetime.now().year
-                        currentMinutes = datetime.datetime.now().minute
-                        currentHours = datetime.datetime.now().hour
-                        currentSeconds = datetime.datetime.now().second
-                        FTPserverDateTime = datetime.datetime(int(currentYear), int(
-                            self.listOfMonths[str(listTwo[counterTwo][5])]),
-                                                              int(listTwo[counterTwo][6]), int(currentHours),
-                                                              int(currentMinutes), currentSeconds)
-                        self.databaseCursor.execute("INSERT INTO file VALUES (%s,%s,%s)", ((str(self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter])),
-                                                                                           (str(listTwo[counter][8])),(FTPserverDateTime)))
-                    except mysql.connector.Error as e:
-                        reportMessage = ("Failed to Add Activated Directory To File \n" + str(e.msg) + "\n")
-                        self.reportToFile(self.reportFileNames[0], reportMessage)
-                        self.resetAll()
-                    try:  # insert into the log the information about the file addition.
-                        self.databaseCursor.execute(
-                            """
-                            INSERT INTO log
-                            VALUES(%s,%s,%s,%s)
-                            """,
-                            (self.keyIDs[maincounter],
-                             str(self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]),
-                             ("New File Has Been Added: " + "'" + str(listTwo[counter][8])) + "'",
-                             FTPserverDateTime))
-                        self.cnnct.commit()
-                    except mysql.connector.Error as e:
-                        reportMessage = ("Failed to Add Activated Directory To Log \n" + str(e.msg) + "\n")
-                        self.reportToFile(self.reportFileNames[0], reportMessage)
-                        self.resetAll()
-        except IndexError:
-            reportMessage = "Index Error 3"
-            self.reportToFile(self.reportFileNames[4], reportMessage)
-            self.resetAll()
 
 
 
 
     def CheckExistenceDbToServer(self, listOne, listTwo, serverCounter, maincounter):
-        try:
-            for counter in range(len(listOne)):
-                found = False
-                for counterTwo in range(len(listTwo)):
-                    if(listOne[counter][0] == listTwo[counterTwo][8]):
-                        found = True
-                        break
-                if(found == False):
-                    try:
-                        self.Parent.popupAnnouncer("File Has Been Removed from " + self.serverInformation[0][0] + " At " + str(
-                            self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]), listOne[counter][0])
-                    except IndexError:
-                        self.resetAll()
-                    try:
-                        currentYear = datetime.datetime.now().year
-                        currentMinutes = datetime.datetime.now().minute
-                        currentHours = datetime.datetime.now().hour
-                        currentSeconds = datetime.datetime.now().second
-                        FTPserverDateTime = datetime.datetime(int(currentYear), int(
-                            self.listOfMonths[str(listTwo[counterTwo][5])]),
-                                                              int(listTwo[counterTwo][6]), int(currentHours),
-                                                              int(currentMinutes), currentSeconds)
-                        self.databaseCursor.execute(
-                            """
-                            INSERT INTO log
-                            VALUES(%s,%s,%s,%s)
-                            """,
-                            (self.keyIDs[maincounter],
-                             str(self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]),
-                             ("File Has Been Removed: " + "'" + str(listOne[counter][0])) + "'",
-                             FTPserverDateTime))
-                        self.cnnct.commit()
-                    except mysql.connector.Error as e:
-                        reportMessage = ("Failed to insert Activated item Deleted into LOG \n" + str(e.msg) + "\n")
-                        self.reportToFile(self.reportFileNames[0], reportMessage)
-                        self.resetAll()
-                    try:
-                        self.databaseCursor.execute(
-                            "DELETE FROM file WHERE file = " + "'" + (
-                                str(listOne[counter][0])) + "'")
-                        self.cnnct.commit()
-                    except mysql.connector.Error as e:
-                        reportMessage = ("Failed to Delete Activated Directory From File \n" + str(e.msg) + "\n")
-                        self.reportToFile(self.reportFileNames[0], reportMessage)
-                        self.resetAll()
-        except IndexError:
-            reportMessage = "Index Error 4"
-            self.reportToFile(self.reportFileNames[4], reportMessage)
-            self.resetAll()
+        for counter in range(len(listOne)):
+            found = False
+            for counterTwo in range(len(listTwo)):
+                if(listOne[counter][0] == listTwo[counterTwo][8]):
+                    found = True
+                    break
+            if(found == False):
+                try:
+                    self.Parent.popupAnnouncer("File Has Been Removed from " + self.serverInformation[0][0] + " At " + str(
+                        self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]), listOne[counter][0])
+                except IndexError:
+                    self.resetAll()
+                try:
+                    currentYear = datetime.datetime.now().year
+                    currentMinutes = datetime.datetime.now().minute
+                    currentHours = datetime.datetime.now().hour
+                    currentSeconds = datetime.datetime.now().second
+                    FTPserverDateTime = datetime.datetime(int(currentYear), int(
+                        self.listOfMonths[str(listTwo[counterTwo][5])]),
+                                                          int(listTwo[counterTwo][6]), int(currentHours),
+                                                          int(currentMinutes), currentSeconds)
+                    self.databaseCursor.execute(
+                        """
+                        INSERT INTO log
+                        VALUES(%s,%s,%s,%s)
+                        """,
+                        (self.keyIDs[maincounter],
+                         str(self.serverDirectoryDictionary[self.keyIDs[maincounter]][serverCounter]),
+                         ("File Has Been Removed: " + "'" + str(listOne[counter][0])) + "'",
+                         FTPserverDateTime))
+                    self.cnnct.commit()
+                except mysql.connector.Error as e:
+                    reportMessage = ("Failed to insert Activated item Deleted into LOG \n" + str(e.msg) + "\n")
+                    self.reportToFile(self.reportFileNames[0], reportMessage)
+                    self.resetAll()
+                try:
+                    self.databaseCursor.execute(
+                        "DELETE FROM file WHERE file = " + "'" + (
+                            str(listOne[counter][0])) + "'")
+                    self.cnnct.commit()
+                except mysql.connector.Error as e:
+                    reportMessage = ("Failed to Delete Activated Directory From File \n" + str(e.msg) + "\n")
+                    self.reportToFile(self.reportFileNames[0], reportMessage)
+                    self.resetAll()
+
 
     def checkIteration(self, listOne, listTwo, serverCounter, maincounter):
-        try:
-            for counter in range(len(listOne)):
-                for counterTwo in range(len(listTwo)):
+        for counter in range(len(listOne)):
+            for counterTwo in range(len(listTwo)):
+                if(len(listTwo[counterTwo]) >= 8):
                     if(listOne[counter][0] == listTwo [counterTwo][8]):
                         itemFound = True
                         if(":" in listTwo[counterTwo][7]):
@@ -401,74 +388,79 @@ class FTP_checker(QtCore.QObject):
                                     self.resetAll()
                             elif(":" not in listTwo[counterTwo][7]):
                                 pass
-        except IndexError:
-            reportMessage = "Index Error 5"
-            self.reportToFile(self.reportFileNames[4], reportMessage)
-            self.resetAll()
 
 
 
     def UnactivatedToActivated(self):
-        try:
-            for counter in range(len(self.keyIDs)):
-                try:#fetch all server information EXEPT PASSWORD
-                    self.databaseCursor.execute(
-                        "SELECT serverName, host, userName, port FROM server WHERE id LIKE " + "'" + str(self.keyIDs[counter]) + "'"
-                    )
-                    self.cnnct.commit()
-                    self.serverInformation = self.databaseCursor.fetchall()
-                except mysql.connector.Error as e:
-                    reportMessage = "Failed to fetch Unactivated server Information from DB : \n" + str(e.msg) + "\n"
-                    self.reportToFile(self.reportFileNames[1], reportMessage)
-                    self.resetAll()
+        for counter in range(len(self.keyIDs)):
+            try:#fetch all server information EXEPT PASSWORD
+                self.databaseCursor.execute(
+                    "SELECT serverName, host, userName, port FROM server WHERE id LIKE " + "'" + str(self.keyIDs[counter]) + "'"
+                )
+                self.cnnct.commit()
+                self.serverInformation = self.databaseCursor.fetchall()
+            except mysql.connector.Error as e:
+                reportMessage = "Failed to fetch Unactivated server Information from DB : \n" + str(e.msg) + "\n"
+                self.reportToFile(self.reportFileNames[1], reportMessage)
+                self.resetAll()
 
-                try:#assign the information to variables
-                    serverName = self.serverInformation[0][0]
-                    hostURL = self.serverInformation[0][1]
-                    userName = self.serverInformation[0][2]
-                    serverPort = self.serverInformation[0][3]
-                except ValueError:
-                    reportMessage = "Failed to assign Fetched Information From unactivated servers : \n" + str(e.msg) +"\n"
-                    self.reportToFile(self.reportFileNames[1], reportMessage)
-                    self.resetAll()
+            try:#assign the information to variables
+                serverName = self.serverInformation[0][0]
+                hostURL = self.serverInformation[0][1]
+                userName = self.serverInformation[0][2]
+                serverPort = self.serverInformation[0][3]
+            except ValueError:
+                reportMessage = "Failed to assign Fetched Information From unactivated servers : \n" + str(e.msg) +"\n"
+                self.reportToFile(self.reportFileNames[1], reportMessage)
+                self.resetAll()
 
-                try:#fetch the password from the db
-                    self.databaseCursor.execute(
-                        "SELECT password FROM server WHERE id LIKE "+ "'" + str(self.keyIDs[counter]) + "'"
-                    )
-                    self.cnnct.commit()
-                    fetchedServerPassword = self.databaseCursor.fetchall()
-                    userPassword = self.Parent.decrypt_server_password(fetchedServerPassword[0])
-                except mysql.connector.Error as e:
-                    reportMessage = "Failed to fetch Password from Unactivated server from DB : \n" + str(e) + "\n"
-                    self.reportToFile(self.reportFileNames[1], reportMessage)
-                    self.resetAll()
+            try:#fetch the password from the db
+                self.databaseCursor.execute(
+                    "SELECT password FROM server WHERE id LIKE "+ "'" + str(self.keyIDs[counter]) + "'"
+                )
+                self.cnnct.commit()
+                fetchedServerPassword = self.databaseCursor.fetchall()
+                userPassword = self.Parent.decrypt_server_password(fetchedServerPassword[0])
+            except mysql.connector.Error as e:
+                reportMessage = "Failed to fetch Password from Unactivated server from DB : \n" + str(e) + "\n"
+                self.reportToFile(self.reportFileNames[1], reportMessage)
+                self.resetAll()
 
-                try:#Connect to FTP to get all the data
-                    ftp = ftplib.FTP()
-                    ftp.connect(host = hostURL, port = serverPort)
-                    ftp.login(user = userName, passwd= userPassword)
+            try:#Connect to FTP to get all the data
+                ftp = ftplib.FTP()
+                ftp.connect(host = hostURL, port = serverPort)
+                ftp.login(user = userName, passwd= userPassword)
 
-                    for directoryCounter in range(len(self.serverDirectoryDictionary[self.keyIDs[counter]])):
-                        try:#Change to Currect Working Directory
-                            ftp.cwd(str(self.serverDirectoryDictionary[self.keyIDs[counter]][directoryCounter]))
-                            listofFTPfiles = []
-                            ftp.dir(listofFTPfiles.append)
-                        except ftplib.all_errors as directoryError:
-                            reportMessage = "Failed to CWD inside Unactivated FTP server \n" + str(directoryError) + "\n"
-                            self.reportToFile(self.reportFileNames[3], reportMessage)
-                            self.resetAll()
-
-                        for splitFileCounter in range(len(listofFTPfiles)):
-                            splittedFiles = self.splitClearer(listofFTPfiles[splitFileCounter].split(" "))
-                            # print(splittedFiles)
-
+                for directoryCounter in range(len(self.serverDirectoryDictionary[self.keyIDs[counter]])):
+                    try:#Change to Currect Working Directory
+                        ftp.cwd(str(self.serverDirectoryDictionary[self.keyIDs[counter]][directoryCounter]))
+                        listofFTPfiles = []
+                        ftp.dir(listofFTPfiles.append)
+                        # print(str(listofFTPfiles).encode("utf-8"))
+                        # print("\n")
+                    except ftplib.all_errors as directoryError:
+                        reportMessage = "Failed to CWD inside Unactivated FTP server \n" + str(directoryError) + "\n"
+                        self.reportToFile(self.reportFileNames[3], reportMessage)
+                        self.resetAll()
+                    print((listofFTPfiles[1]))
+                    print("\n")
+                    print((listofFTPfiles[2]))
+                    for splitFileCounter in range(len(listofFTPfiles)):
+                        print(str(listofFTPfiles[splitFileCounter]).encode("utf-8"))
+                        # print(str(listofFTPfiles[splitFileCounter]).code("euc-kr"))
+                        print(codecs.encode(str(listofFTPfiles[splitFileCounter]), "utf-8"))
+                        print(codecs.encode(str(listofFTPfiles[splitFileCounter]), "euc-kr"))
+                        print(str(listofFTPfiles[splitFileCounter]), "lala")
+                        print((listofFTPfiles[splitFileCounter]).encode("utf-8"))
+                        splittedFiles = self.splitClearer(listofFTPfiles[splitFileCounter].split(" "))
+                        # print(splittedFiles)
+                        print((splittedFiles))
+                        print("\n")
+                        if(len(splittedFiles) >= 7):
                             if(":" in splittedFiles[7]):
                                 currentYear = datetime.datetime.now().year
                                 currentHour, currentMinute = self.HourMinuteSplitter(splittedFiles[7])
-                                ModifiedTime = str(currentYear) + "-" + str(
-                                    self.listOfMonths[str(splittedFiles[5])]) + "-" + str(splittedFiles[6]) + " " + str(
-                                    currentHour) + ":" + str(currentMinute) + ":" + str(00)
+                                ModifiedTime = str(currentYear) + "-" + str(self.listOfMonths[str(splittedFiles[5])]) + "-" + str(splittedFiles[6]) + " " + str(currentHour) + ":" + str(currentMinute) + ":" + "00"
                                 try:
                                     self.databaseCursor.execute("INSERT INTO file VALUES(%s,%s,%s)", (
                                         (str(self.serverDirectoryDictionary[self.keyIDs[counter]][directoryCounter])),
@@ -482,9 +474,7 @@ class FTP_checker(QtCore.QObject):
                             elif(":" not in splittedFiles[7]):
                                 currentYear = splittedFiles[7]
                                 currentHour, currentMinute = "00", "00"
-                                ModifiedTime = str(currentYear) + "-" + str(
-                                    self.listOfMonths[str(splittedFiles[5])]) + "-" + str(splittedFiles[6]) + " " + str(
-                                    currentHour) + ":" + str(currentMinute) + ":" + str(00)
+                                ModifiedTime = str(currentYear) + "-" + str(self.listOfMonths[str(splittedFiles[5])]) + "-" + str(splittedFiles[6]) + " " + str(currentHour) + ":" + str(currentMinute) + ":" + str(00)
                                 try:
                                     self.databaseCursor.execute("INSERT INTO file VALUES(%s,%s,%s)", (
                                         (str(self.serverDirectoryDictionary[self.keyIDs[counter]][directoryCounter])),
@@ -508,14 +498,12 @@ class FTP_checker(QtCore.QObject):
                             self.resetAll()
                     ftp.close()
 
-                except ftplib.all_errors as ftpErr:
-                    reportMessage = "Failed to Connect to FTP server : \n" + str(ftpErr) + "\n"
-                    self.reportToFile(self.reportFileNames[3], reportMessage)
-                    self.resetAll()
-        except IndexError:
-            reportMessage = "Index Error 6"
-            self.reportToFile(self.reportFileNames[4], reportMessage)
-            self.resetAll()
+            except ftplib.all_errors as ftpErr:
+                reportMessage = "Failed to Connect to FTP server : \n" + str(ftpErr) + "\n"
+                self.reportToFile(self.reportFileNames[3], reportMessage)
+                self.resetAll()
+
+
 
 
     def HourMinuteSplitter(self, currentHourMinute):
